@@ -7,4 +7,4 @@
 
 - There are some necessary targets in the proposals to be formed. These are 17 Sustainable Development Goals. Proposals must include one or more of these objectives.
 
-- Funders can fund this proposal if it is in line with the goals we have stated above, and if the votes of other community members and leaders are more yes than no votes.
+- Funders can fund this proposal if it is in line with the goals I have stated above, and if the votes of other community members and leaders are more yes than no votes.
