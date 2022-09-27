@@ -24,7 +24,7 @@ contract FundingNFT is ERC721URIStorage, Ownable {
     mapping(address => uint256) public addressToTokenId;
 
     uint256 private s_tokenCounter;
-    string[3] private s_tokenUris;
+    string[] internal s_tokenUris;
 
     event nftMinted(address minter, Breed nftBreed);
     event leadershipTransferred(address oldLeader, address newLeader);
