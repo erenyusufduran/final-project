@@ -7,6 +7,7 @@ error NotHaveRightToVote();
 error ProposalIsNotActive();
 error ProposalStillActive();
 error onlyLeaderCall();
+error onlyFunderCall();
 error NotCommunityMember();
 error AlreadyVoted();
 
@@ -27,13 +28,36 @@ contract FundingDAO {
         uint256 requiredBudget; // Budget needed to implement.
         string description;
         Community community; // Id to Community.
-        mapping(address => bool) voters;
+        Goal[] goals;
+        address[] voters;
+        mapping(address => uint256) fundsBy;
+        uint256 funds;
         bool executed;
     }
 
     enum Vote {
         YES,
         NO
+    }
+
+    enum Goal {
+        NO_PROVERTY,
+        ZERO_HUNGER,
+        GOOD_HEALTH_AND_WELL_BEING,
+        QUALITY_EDUCATION,
+        GENDER_QUALITY,
+        GREEN_WATER,
+        AFFORDABLE_AND_CLEAN_ENERGY,
+        DEVENT_WORK_AND_ECONOMIC_GROWTH,
+        INDUSTRY_INNOVATION_AND_INFTRASTRUCTURE,
+        REDUCES_INEQUALITIES,
+        SUSTAINABLE_CITIES_AND_COMMUNITIES,
+        RESPONSIBLE_CONSUPTION_AND_PRODUCTION,
+        CLIMATE_ACTION,
+        LIFE_BELOW_WATER,
+        LIFE_ON_LAND,
+        PEACT_JUSTICE_AND_STRONG_INSTITUTIONS,
+        PARTNERSHIPS_FOR_THE_GOALS
     }
 
     uint256 proposalCounts;
@@ -50,17 +74,22 @@ contract FundingDAO {
     IFundingNFT fundingNFT;
 
     event memberLeftTheCommunity(address member);
-    event communityCreated(uint256 index);
-    event proposalCreated(uint256 index);
+    event communityCreated(uint256 id);
+    event proposalCreated(uint256 id);
 
     modifier nftHolderOnly() {
         if (fundingNFT.balanceOf(msg.sender) > 0) revert NotHaveRightToVote();
         _;
     }
 
-    modifier activeProposals(uint256 _proposalIndex) {
-        if (block.timestamp > (proposals[_proposalIndex].deadline))
+    modifier activeProposals(uint256 proposalId) {
+        if (block.timestamp > (proposals[proposalId].deadline))
             revert ProposalIsNotActive();
+        _;
+    }
+
+    modifier onlyFunder() {
+        if (!fundingNFT.isFunder(msg.sender)) revert onlyFunderCall();
         _;
     }
 
@@ -75,14 +104,14 @@ contract FundingDAO {
         _;
     }
 
-    modifier activeProposal(uint256 proposalIndex) {
-        if (block.timestamp < proposals[proposalIndex].deadline)
+    modifier activeProposal(uint256 proposalId) {
+        if (block.timestamp < proposals[proposalId].deadline)
             revert ProposalIsNotActive();
         _;
     }
 
-    modifier finishedProposal(uint256 proposalIndex) {
-        if (block.timestamp > proposals[proposalIndex].deadline)
+    modifier finishedProposal(uint256 proposalId) {
+        if (block.timestamp > proposals[proposalId].deadline)
             revert ProposalStillActive();
         _;
     }
@@ -123,42 +152,52 @@ contract FundingDAO {
         delete communityMembers[msg.sender];
     }
 
-    function transferLeadership(address newLeader, uint256 index)
+    function transferLeadership(address newLeader, uint256 communityId)
         external
         onlyLeader
     {
         delete communityMembers[msg.sender];
-        communities[index].leader = newLeader;
+        communities[communityId].leader = newLeader;
         fundingNFT.transferLeadership(newLeader);
     }
 
-    function createProposal(uint256 _requiredBudget, string memory _desc)
-        external
-        onlyLeader
-    {
+    function createProposal(
+        uint256 _requiredBudget,
+        string memory _desc,
+        Goal[] calldata goals
+    ) external onlyLeader {
         Proposal storage newProposal = proposals[proposalCounts];
         newProposal.id = proposalCounts;
         newProposal.deadline = block.timestamp + 5 minutes; // it is for tests
         newProposal.requiredBudget = _requiredBudget;
         newProposal.description = _desc;
         newProposal.community = communityMembers[msg.sender];
+        for (uint256 i; i < goals.length; i++) {
+            newProposal.goals.push(goals[i]);
+        }
         emit proposalCreated(proposalCounts);
         proposalCounts++;
     }
 
-    function voteToProposal(uint256 proposalIndex, Vote vote)
+    function voteToProposal(uint256 proposalId, Vote vote)
         external
-        activeProposal(proposalIndex)
+        activeProposal(proposalId)
     {
         require(
             fundingNFT.balanceOf(msg.sender) > 0,
             "You don't have any NFT."
         );
-        Proposal storage proposal = proposals[proposalIndex];
-        if (proposal.voters[msg.sender]) {
-            revert AlreadyVoted();
+        Proposal storage proposal = proposals[proposalId];
+        require(
+            proposal.community.leader != communityMembers[msg.sender].leader,
+            "You can't vote your own proposal."
+        );
+        for (uint256 i; i < proposal.voters.length; i++) {
+            if (proposal.voters[i] == msg.sender) {
+                revert AlreadyVoted();
+            }
         }
-        proposal.voters[msg.sender] = true;
+        proposal.voters.push(msg.sender);
         if (vote == Vote.YES) {
             proposal.yesVotes += 1;
         }
@@ -178,9 +217,99 @@ contract FundingDAO {
         );
         require(
             proposal.yesVotes > proposal.noVotes,
-            "Yes votes is not enough."
+            "Proposal couldn't pass the vote."
         );
         require(!proposal.executed, "Already executed.");
         proposal.executed = true;
+    }
+
+    function fundToProposal(uint256 proposalIndex)
+        external
+        payable
+        onlyFunder
+        nftHolderOnly
+    {
+        Proposal storage proposal = proposals[proposalIndex];
+        require(proposal.executed, "Proposal is not executed.");
+        proposal.funds += msg.value;
+        proposal.fundsBy[msg.sender] = msg.value;
+    }
+
+    function getCommunity(uint256 communityId)
+        external
+        view
+        returns (
+            uint256 id,
+            string memory name,
+            string memory description,
+            address leader,
+            address[] memory members
+        )
+    {
+        Community storage community = communities[communityId];
+        return (
+            community.id,
+            community.name,
+            community.description,
+            community.leader,
+            community.members
+        );
+    }
+
+    function getLeaderOfTheCommunity(uint256 communityId)
+        external
+        view
+        returns (address)
+    {
+        return communities[communityId].leader;
+    }
+
+    function getProposal(uint256 proposalId)
+        external
+        view
+        returns (
+            uint256 id,
+            uint256 yesVotes,
+            uint256 noVotes,
+            uint256 deadline,
+            uint256 requiredBudget,
+            string memory description,
+            Community memory community,
+            Goal[] memory goals,
+            address[] memory voters,
+            uint256 funds,
+            bool executed
+        )
+    {
+        Proposal storage proposal = proposals[proposalId];
+        return (
+            proposal.id,
+            proposal.yesVotes,
+            proposal.noVotes,
+            proposal.deadline,
+            proposal.requiredBudget,
+            proposal.description,
+            proposal.community,
+            proposal.goals,
+            proposal.voters,
+            proposal.funds,
+            proposal.executed
+        );
+    }
+
+    function getProposalGoals(uint256 proposalId)
+        external
+        view
+        returns (Goal[] memory goals)
+    {
+        return proposals[proposalId].goals;
+    }
+
+    function isProposalExecuted(uint256 proposalId)
+        external
+        view
+        returns (bool)
+    {
+        return proposals[proposalId].executed;
     }
 }

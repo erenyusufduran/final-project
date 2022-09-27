@@ -13,6 +13,8 @@ interface IFundingNFT {
         CommunityLeaderNFT
     }
 
+    function setFunders(address[] calldata funderAddresses) external;
+
     /**
      *  The caller can only be owner of the contract.
      *  User in given address will qualify for mint leader NFT.
@@ -24,6 +26,8 @@ interface IFundingNFT {
      *  Users in member addresses array will qualify for mint member NFT.
      */
     function setMembers(address[] calldata memberAddresses) external;
+
+    function mintFunderNFT() external;
 
     /**
      *  Owner of the contract must run setLeader before the function.
@@ -49,6 +53,8 @@ interface IFundingNFT {
      *  And they lose their voting rights.
      */
     function exitTheCommunity() external;
+
+    function isFunder(address funderAddress) external view returns (bool);
 
     /**
      *  Is given address a leader?

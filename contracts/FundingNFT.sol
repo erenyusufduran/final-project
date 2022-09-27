@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/Ownable.sol"; // For accessing onlyOwner.
 
 error OnlyLeaderCanCallTheFunction();
+error OnlyFunderCanCallTheFunction();
 error OnlyMembersCanCallTheFunction();
 error MemberAlreadyHasNFT();
 error YouCanHaveJustOneNFT();
@@ -12,20 +13,29 @@ error InsufficientFunds();
 
 contract FundingNFT is ERC721URIStorage, Ownable {
     enum Breed {
+        funderNFT,
         CommunityMemberNFT,
         CommunityLeaderNFT
     }
 
+    mapping(address => bool) private funders;
     mapping(address => bool) private leaders;
     mapping(address => bool) private members;
     mapping(address => uint256) public addressToTokenId;
 
     uint256 private s_tokenCounter;
-    string[2] private s_tokenUris;
+    string[3] private s_tokenUris;
 
     event nftMinted(address minter, Breed nftBreed);
     event leadershipTransferred(address oldLeader, address newLeader);
     event memberLeftTheCommunity(address oldMember);
+
+    modifier onlyFunder() {
+        if (!funders[msg.sender]) {
+            revert OnlyFunderCanCallTheFunction();
+        }
+        _;
+    }
 
     modifier onlyLeader() {
         if (!leaders[msg.sender]) {
@@ -48,10 +58,16 @@ contract FundingNFT is ERC721URIStorage, Ownable {
         _;
     }
 
-    constructor(string[2] memory tokenUris)
+    constructor(string[3] memory tokenUris)
         ERC721("Funding University Clubs NFT", "FUC")
     {
         s_tokenUris = tokenUris;
+    }
+
+    function setFunders(address[] calldata funderAddresses) external onlyOwner {
+        for (uint256 i; i < funderAddresses.length; i++) {
+            funders[funderAddresses[i]] = true;
+        }
     }
 
     function setLeader(address leaderAddress) external onlyOwner {
@@ -70,9 +86,19 @@ contract FundingNFT is ERC721URIStorage, Ownable {
         }
     }
 
+    function mintFunderNFT() external onlyFunder canOnlyHaveOneNFT {
+        uint256 newTokenId = s_tokenCounter;
+        Breed nftBreed = Breed(0);
+        s_tokenCounter++;
+        addressToTokenId[msg.sender] = newTokenId;
+        _safeMint(msg.sender, newTokenId);
+        _setTokenURI(newTokenId, s_tokenUris[uint256(nftBreed)]);
+        emit nftMinted(msg.sender, nftBreed);
+    }
+
     function mintLeaderNFT() external onlyLeader canOnlyHaveOneNFT {
         uint256 newTokenId = s_tokenCounter;
-        Breed nftBreed = Breed(1);
+        Breed nftBreed = Breed(2);
         s_tokenCounter++;
         addressToTokenId[msg.sender] = newTokenId;
         _safeMint(msg.sender, newTokenId);
@@ -82,7 +108,7 @@ contract FundingNFT is ERC721URIStorage, Ownable {
 
     function mintMemberNFT() external onlyMembers canOnlyHaveOneNFT {
         uint256 newTokenId = s_tokenCounter;
-        Breed nftBreed = Breed(0);
+        Breed nftBreed = Breed(1);
         s_tokenCounter++;
         addressToTokenId[msg.sender] = newTokenId;
         _safeMint(msg.sender, newTokenId);
@@ -113,6 +139,10 @@ contract FundingNFT is ERC721URIStorage, Ownable {
         delete addressToTokenId[msg.sender];
         _burn(_tokenId);
         emit memberLeftTheCommunity(msg.sender);
+    }
+
+    function isFunder(address funderAddress) external view returns (bool) {
+        return funders[funderAddress];
     }
 
     function isLeader(address leaderAddress) external view returns (bool) {
