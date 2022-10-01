@@ -13,7 +13,11 @@ interface IFundingNFT {
         CommunityLeaderNFT
     }
 
-    function setFunders(address[] calldata funderAddresses) external;
+    enum Person {
+        USER,
+        MEMBER,
+        LEADER
+    }
 
     /**
      *  The caller can only be owner of the contract.
@@ -40,12 +44,6 @@ interface IFundingNFT {
      *  The caller can only be a member.
      */
     function mintMemberNFT() external;
-
-    /**
-     *  Only leaders can call the function.
-     *  They can hand over their leaderships.
-     */
-    function transferLeadership(address newLeader) external;
 
     /**
      *  Only members can exit their communities.
@@ -75,4 +73,6 @@ interface IFundingNFT {
     function balanceOf(address owner) external view returns (uint256 balance);
 
     function ownerOf(uint256 tokenId) external view returns (address owner);
+
+    function getUserStatus() external view returns (Person);
 }

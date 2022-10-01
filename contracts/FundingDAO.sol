@@ -10,31 +10,44 @@ error onlyLeaderCall();
 error onlyFunderCall();
 error NotCommunityMember();
 error AlreadyVoted();
+error FundIsEnoughForThisProposal();
+error FundingStillActive();
 
 contract FundingDAO {
     struct Community {
-        uint256 id;
+        uint16 id;
         string name;
         string description;
         address leader;
+        bool isElectionOpen;
         address[] members;
+        uint256[] proposals; // proposalIds
     }
 
     struct Proposal {
         uint256 id;
         uint256 yesVotes;
         uint256 noVotes;
-        uint256 deadline; // Deadline of the proposal.
+        uint256 deadline; // Deadline for the voting.
+        uint256 fundingDeadline; // Deadline for the funding.
         uint256 requiredBudget; // Budget needed to implement.
-        string description;
-        Community community; // Id to Community.
+        string problem;
+        string howToRegenerate;
+        uint16 community; // Id to Community.
         Goal[] goals;
-        address[] voters;
+        mapping(address => bool) voters;
         mapping(address => uint256) fundsBy;
         uint256 funds;
         bool executed;
-    }
+        ProposalStatus status;
+    } // reporting
 
+    enum ProposalStatus {
+        NOT_STARTED,
+        CONTINUE,
+        FINISHED
+    }
+    //crossover
     enum Vote {
         YES,
         NO
@@ -59,47 +72,33 @@ contract FundingDAO {
         PEACT_JUSTICE_AND_STRONG_INSTITUTIONS,
         PARTNERSHIPS_FOR_THE_GOALS
     }
-
+    //hyperstructures zora jacob?
     uint256 proposalCounts;
     mapping(uint256 => Proposal) public proposals;
 
-    uint256 communityCounts;
-    mapping(uint256 => Community) public communities;
-    mapping(address => Community) public communityMembers;
+    uint16 communityCounts;
+    mapping(uint16 => Community) public communities;
+    mapping(address => uint16) public communityMembers;
+
+    mapping(address => uint256) public membersTheVote; // leader choosing
+    mapping(address => bool) public isMemberVoted;
     /**
      *  Community Id To Proposal array.
      *  Let users know, which proposals who created.
      */
-    mapping(uint256 => Proposal[]) public communityIdToProposals;
     IFundingNFT fundingNFT;
 
     event memberLeftTheCommunity(address member);
-    event communityCreated(uint256 id);
+    event communityCreated(uint16 id);
     event proposalCreated(uint256 id);
-
-    modifier nftHolderOnly() {
-        if (fundingNFT.balanceOf(msg.sender) > 0) revert NotHaveRightToVote();
-        _;
-    }
-
-    modifier activeProposals(uint256 proposalId) {
-        if (block.timestamp > (proposals[proposalId].deadline))
-            revert ProposalIsNotActive();
-        _;
-    }
-
-    modifier onlyFunder() {
-        if (!fundingNFT.isFunder(msg.sender)) revert onlyFunderCall();
-        _;
-    }
 
     modifier onlyLeader() {
         if (!fundingNFT.isLeader(msg.sender)) revert onlyLeaderCall();
         _;
     }
 
-    modifier onlyMembers(uint256 communityId) {
-        if (communityMembers[msg.sender].id != communityId)
+    modifier onlyMembers(uint16 communityId) {
+        if (communityMembers[msg.sender] != communityId)
             revert NotCommunityMember();
         _;
     }
@@ -116,22 +115,64 @@ contract FundingDAO {
         _;
     }
 
+    modifier fundingFinished(uint256 proposalId) {
+        if (block.timestamp > proposals[proposalId].fundingDeadline)
+            revert FundingStillActive();
+        _;
+    }
+
+    modifier needFund(uint256 proposalId) {
+        if (
+            proposals[proposalId].funds + msg.value >
+            proposals[proposalId].requiredBudget
+        ) revert FundIsEnoughForThisProposal();
+        _;
+    }
+
     constructor(address _fundingNFT) {
         fundingNFT = IFundingNFT(_fundingNFT);
     }
 
-    function createCommunity(string memory _name, string memory _description)
-        external
-        onlyLeader
-    {
+    function createCommunity(
+        string memory _name,
+        string memory _description,
+        address[4] calldata membersAddresses
+    ) external {
         Community storage newCommunity = communities[communityCounts];
         newCommunity.id = communityCounts;
         newCommunity.name = _name;
         newCommunity.description = _description;
-        newCommunity.leader = msg.sender;
-        communityMembers[msg.sender] = newCommunity;
+        communityMembers[msg.sender] = communityCounts;
+        newCommunity.members.push(msg.sender);
+        for (uint256 i; i < membersAddresses.length; i++) {
+            newCommunity.members.push(membersAddresses[i]);
+        }
         emit communityCreated(communityCounts);
         communityCounts++;
+    }
+
+    function startALeaderElection() external {
+        Community storage community = communities[communityMembers[msg.sender]];
+        require(community.isElectionOpen == false, "Election already open.");
+        community.isElectionOpen = true;
+    }
+
+    function voteForLeader(address leaderAddress) external {
+        Community storage community = communities[communityMembers[msg.sender]];
+        require(
+            community.id == communityMembers[leaderAddress],
+            "Leader must be in your community."
+        );
+        require(community.isElectionOpen == true, "Election is not open.");
+        require(isMemberVoted[msg.sender] == false, "Member already voted.");
+        isMemberVoted[msg.sender] = true;
+        membersTheVote[leaderAddress] += 1;
+        if (community.leader != address(0)) {}
+        if (membersTheVote[leaderAddress] * 2 > community.members.length) {
+            community.leader = leaderAddress;
+            fundingNFT.setLeader(leaderAddress);
+            community.isElectionOpen = false;
+        }
     }
 
     function addMembersToCommunity(address[] calldata memberAddresses)
@@ -140,11 +181,13 @@ contract FundingDAO {
     {
         fundingNFT.setMembers(memberAddresses);
         for (uint256 i; i < memberAddresses.length; i++) {
-            communityMembers[msg.sender].members.push(memberAddresses[i]);
+            communities[communityMembers[msg.sender]].members.push(
+                memberAddresses[i]
+            );
         }
     }
 
-    function leftTheCommunity(uint256 communityId)
+    function leftTheCommunity(uint16 communityId)
         external
         onlyMembers(communityId)
     {
@@ -152,29 +195,24 @@ contract FundingDAO {
         delete communityMembers[msg.sender];
     }
 
-    function transferLeadership(address newLeader, uint256 communityId)
-        external
-        onlyLeader
-    {
-        delete communityMembers[msg.sender];
-        communities[communityId].leader = newLeader;
-        fundingNFT.transferLeadership(newLeader);
-    }
-
     function createProposal(
         uint256 _requiredBudget,
-        string memory _desc,
+        string memory _problem,
+        string memory howTo,
         Goal[] calldata goals
     ) external onlyLeader {
+        Community storage community = communities[communityMembers[msg.sender]];
         Proposal storage newProposal = proposals[proposalCounts];
         newProposal.id = proposalCounts;
-        newProposal.deadline = block.timestamp + 5 minutes; // it is for tests
+        newProposal.deadline = block.timestamp + 2 days;
         newProposal.requiredBudget = _requiredBudget;
-        newProposal.description = _desc;
+        newProposal.problem = _problem;
+        newProposal.howToRegenerate = howTo;
         newProposal.community = communityMembers[msg.sender];
         for (uint256 i; i < goals.length; i++) {
             newProposal.goals.push(goals[i]);
         }
+        community.proposals.push(newProposal.id);
         emit proposalCreated(proposalCounts);
         proposalCounts++;
     }
@@ -189,15 +227,13 @@ contract FundingDAO {
         );
         Proposal storage proposal = proposals[proposalId];
         require(
-            proposal.community.leader != communityMembers[msg.sender].leader,
+            communities[proposal.community].leader !=
+                communities[communityMembers[msg.sender]].leader,
             "You can't vote your own proposal."
         );
-        for (uint256 i; i < proposal.voters.length; i++) {
-            if (proposal.voters[i] == msg.sender) {
-                revert AlreadyVoted();
-            }
+        if (proposal.voters[msg.sender] == true) {
+            revert AlreadyVoted();
         }
-        proposal.voters.push(msg.sender);
         if (vote == Vote.YES) {
             proposal.yesVotes += 1;
         }
@@ -212,7 +248,7 @@ contract FundingDAO {
     {
         Proposal storage proposal = proposals[proposalIndex];
         require(
-            proposal.community.leader == msg.sender,
+            communities[proposal.community].leader == msg.sender,
             "The person who opened can execute."
         );
         require(
@@ -221,30 +257,79 @@ contract FundingDAO {
         );
         require(!proposal.executed, "Already executed.");
         proposal.executed = true;
+        proposal.fundingDeadline = block.timestamp + 10 days;
+    }
+
+    function changeProposalStatus(uint256 proposalIndex, ProposalStatus _status)
+        external
+        onlyLeader
+    {
+        Proposal storage proposal = proposals[proposalIndex];
+        require(proposal.executed == true, "Proposal is not executed.");
+        proposal.status = _status;
     }
 
     function fundToProposal(uint256 proposalIndex)
         external
         payable
-        onlyFunder
-        nftHolderOnly
+        needFund(proposalIndex)
     {
         Proposal storage proposal = proposals[proposalIndex];
         require(proposal.executed, "Proposal is not executed.");
         proposal.funds += msg.value;
-        proposal.fundsBy[msg.sender] = msg.value;
+        proposal.fundsBy[msg.sender] += msg.value;
+        uint256 difference = proposal.funds - proposal.requiredBudget;
+        if (difference > 0) {
+            proposal.funds = proposal.requiredBudget;
+            proposal.fundsBy[msg.sender] -= difference;
+            (bool success, ) = msg.sender.call{value: difference}("");
+            require(success, "Failed to sent.");
+        }
     }
 
-    function getCommunity(uint256 communityId)
+    function getFundsFromProposal(uint256 proposalIndex)
+        external
+        payable
+        finishedProposal(proposalIndex)
+        fundingFinished(proposalIndex)
+        onlyLeader
+    {
+        Proposal storage proposal = proposals[proposalIndex];
+        require(
+            msg.sender == communities[proposal.community].leader,
+            "Nonauthorized!"
+        );
+        (bool success, ) = communities[proposal.community].leader.call{
+            value: proposal.funds
+        }("");
+        require(success, "Failed to sent.");
+    }
+
+    function refundFunders(uint256 proposalIndex, uint256 _amount)
+        external
+        payable
+        finishedProposal(proposalIndex)
+    {
+        Proposal storage proposal = proposals[proposalIndex];
+        require(proposal.executed == false, "Project already executed.");
+        require(proposal.fundsBy[msg.sender] > 0, "You have no funds.");
+        proposal.fundsBy[msg.sender] -= _amount;
+        proposal.funds -= _amount;
+        (bool success, ) = msg.sender.call{value: _amount}("");
+        require(success, "Failed to sent.");
+    }
+
+    function getCommunity(uint16 communityId)
         external
         view
         returns (
-            uint256 id,
+            uint16 id,
             string memory name,
             string memory description,
             address leader,
             address[] memory members
         )
+    // uint256[] memory proposalIds
     {
         Community storage community = communities[communityId];
         return (
@@ -253,48 +338,29 @@ contract FundingDAO {
             community.description,
             community.leader,
             community.members
+            // community.proposals //*/!
         );
     }
 
-    function getLeaderOfTheCommunity(uint256 communityId)
+    function getCommunitiesProposals(uint16 communityId)
+        external
+        view
+        returns (uint256[] memory)
+    {
+        Community storage community = communities[communityId];
+        return community.proposals;
+    }
+
+    function getLeaderOfTheCommunity(uint16 communityId)
         external
         view
         returns (address)
     {
-        return communities[communityId].leader;
-    }
-
-    function getProposal(uint256 proposalId)
-        external
-        view
-        returns (
-            uint256 id,
-            uint256 yesVotes,
-            uint256 noVotes,
-            uint256 deadline,
-            uint256 requiredBudget,
-            string memory description,
-            Community memory community,
-            Goal[] memory goals,
-            address[] memory voters,
-            uint256 funds,
-            bool executed
-        )
-    {
-        Proposal storage proposal = proposals[proposalId];
-        return (
-            proposal.id,
-            proposal.yesVotes,
-            proposal.noVotes,
-            proposal.deadline,
-            proposal.requiredBudget,
-            proposal.description,
-            proposal.community,
-            proposal.goals,
-            proposal.voters,
-            proposal.funds,
-            proposal.executed
+        require(
+            communities[communityId].leader != address(0),
+            "There is no leader."
         );
+        return communities[communityId].leader;
     }
 
     function getProposalGoals(uint256 proposalId)
@@ -303,6 +369,14 @@ contract FundingDAO {
         returns (Goal[] memory goals)
     {
         return proposals[proposalId].goals;
+    }
+
+    function getProposalStatus(uint256 proposalId)
+        external
+        view
+        returns (ProposalStatus)
+    {
+        return proposals[proposalId].status;
     }
 
     function isProposalExecuted(uint256 proposalId)

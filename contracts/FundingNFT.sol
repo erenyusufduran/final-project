@@ -2,7 +2,6 @@
 pragma solidity ^0.8.7;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/access/Ownable.sol"; // For accessing onlyOwner.
 
 error OnlyLeaderCanCallTheFunction();
 error OnlyFunderCanCallTheFunction();
@@ -11,15 +10,20 @@ error MemberAlreadyHasNFT();
 error YouCanHaveJustOneNFT();
 error InsufficientFunds();
 
-contract FundingNFT is ERC721URIStorage, Ownable {
+contract FundingNFT is ERC721URIStorage {
     enum Breed {
-        funderNFT,
         CommunityMemberNFT,
         CommunityLeaderNFT
     }
 
-    mapping(address => bool) private funders;
-    mapping(address => bool) private leaders;
+    enum Person {
+        USER,
+        MEMBER,
+        LEADER
+    }
+
+    mapping(address => Person) private userStatus;
+    mapping(address => bool) public leaders;
     mapping(address => bool) private members;
     mapping(address => uint256) public addressToTokenId;
 
@@ -29,13 +33,6 @@ contract FundingNFT is ERC721URIStorage, Ownable {
     event nftMinted(address minter, Breed nftBreed);
     event leadershipTransferred(address oldLeader, address newLeader);
     event memberLeftTheCommunity(address oldMember);
-
-    modifier onlyFunder() {
-        if (!funders[msg.sender]) {
-            revert OnlyFunderCanCallTheFunction();
-        }
-        _;
-    }
 
     modifier onlyLeader() {
         if (!leaders[msg.sender]) {
@@ -51,62 +48,24 @@ contract FundingNFT is ERC721URIStorage, Ownable {
         _;
     }
 
-    modifier canOnlyHaveOneNFT() {
-        if (balanceOf(msg.sender) > 0) {
-            revert YouCanHaveJustOneNFT();
-        }
-        _;
-    }
-
-    constructor(string[3] memory tokenUris)
+    constructor(string[2] memory tokenUris)
         ERC721("Funding University Clubs NFT", "FUC")
     {
         s_tokenUris = tokenUris;
     }
 
-    function setFunders(address[] calldata funderAddresses) external onlyOwner {
-        for (uint256 i; i < funderAddresses.length; i++) {
-            funders[funderAddresses[i]] = true;
-        }
-    }
-
-    function setLeader(address leaderAddress) external onlyOwner {
+    function setLeader(address leaderAddress) external {
         leaders[leaderAddress] = true;
+        userStatus[leaderAddress] = Person.LEADER;
     }
 
-    function setMembers(address[] calldata memberAddresses)
-        external
-        onlyLeader
-    {
+    function setMembers(address[] calldata memberAddresses) external {
         for (uint256 i; i < memberAddresses.length; i++) {
-            if (members[memberAddresses[i]] == true) {
-                revert MemberAlreadyHasNFT();
-            }
             members[memberAddresses[i]] = true;
         }
     }
 
-    function mintFunderNFT() external onlyFunder canOnlyHaveOneNFT {
-        uint256 newTokenId = s_tokenCounter;
-        Breed nftBreed = Breed(0);
-        s_tokenCounter++;
-        addressToTokenId[msg.sender] = newTokenId;
-        _safeMint(msg.sender, newTokenId);
-        _setTokenURI(newTokenId, s_tokenUris[uint256(nftBreed)]);
-        emit nftMinted(msg.sender, nftBreed);
-    }
-
-    function mintLeaderNFT() external onlyLeader canOnlyHaveOneNFT {
-        uint256 newTokenId = s_tokenCounter;
-        Breed nftBreed = Breed(2);
-        s_tokenCounter++;
-        addressToTokenId[msg.sender] = newTokenId;
-        _safeMint(msg.sender, newTokenId);
-        _setTokenURI(newTokenId, s_tokenUris[uint256(nftBreed)]);
-        emit nftMinted(msg.sender, nftBreed);
-    }
-
-    function mintMemberNFT() external onlyMembers canOnlyHaveOneNFT {
+    function mintLeaderNFT() external onlyLeader {
         uint256 newTokenId = s_tokenCounter;
         Breed nftBreed = Breed(1);
         s_tokenCounter++;
@@ -116,20 +75,14 @@ contract FundingNFT is ERC721URIStorage, Ownable {
         emit nftMinted(msg.sender, nftBreed);
     }
 
-    function transferLeadership(address newLeader) external onlyLeader {
-        require(
-            balanceOf(msg.sender) > 0,
-            "You haven't minted leader NFT yet."
-        );
-        leaders[msg.sender] = false;
-        leaders[newLeader] = true;
-        if (balanceOf(newLeader) == 1) {
-            _burn(addressToTokenId[newLeader]);
-        }
-        addressToTokenId[newLeader] = addressToTokenId[msg.sender];
-        delete addressToTokenId[msg.sender];
-        safeTransferFrom(msg.sender, newLeader, addressToTokenId[newLeader]);
-        emit leadershipTransferred(msg.sender, newLeader);
+    function mintMemberNFT() external onlyMembers {
+        uint256 newTokenId = s_tokenCounter;
+        Breed nftBreed = Breed(0);
+        s_tokenCounter++;
+        addressToTokenId[msg.sender] = newTokenId;
+        _safeMint(msg.sender, newTokenId);
+        _setTokenURI(newTokenId, s_tokenUris[uint256(nftBreed)]);
+        emit nftMinted(msg.sender, nftBreed);
     }
 
     function exitTheCommunity() external onlyMembers {
@@ -139,10 +92,6 @@ contract FundingNFT is ERC721URIStorage, Ownable {
         delete addressToTokenId[msg.sender];
         _burn(_tokenId);
         emit memberLeftTheCommunity(msg.sender);
-    }
-
-    function isFunder(address funderAddress) external view returns (bool) {
-        return funders[funderAddress];
     }
 
     function isLeader(address leaderAddress) external view returns (bool) {
@@ -163,5 +112,9 @@ contract FundingNFT is ERC721URIStorage, Ownable {
 
     function getTokenCounter() external view returns (uint256) {
         return s_tokenCounter;
+    }
+
+    function getUserStatus() external view returns (Person) {
+        return userStatus[msg.sender];
     }
 }

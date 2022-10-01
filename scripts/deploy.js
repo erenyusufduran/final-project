@@ -12,11 +12,7 @@ const metadataTemplate = {
   attributes: [{ trait_type: "prestige" }],
 };
 
-let tokenUris = [
-  "ipfs://QmSXqgJH5W1Hc3m5EZfCGJBe6JWqZUW7eruMa1jKjDcjwN",
-  "ipfs://QmXKDz1PrAs74pgMcJrYVCnF2NTp3DXKZo5WEtWMaGVi18",
-  "ipfs://QmQqdyEfHursFGjGPWJEfyy65ujWJtUmwn3nLgfSCDkix2",
-];
+let tokenUris = [];
 
 async function main() {
   if (process.env.UPLOAD_TO_PINATA == "true") {
@@ -44,9 +40,9 @@ async function handleTokenUris() {
   const { responses: imageUploadResponses, files } = await storeImages(imagesLocation);
   for (imageUploadResponseIndex in imageUploadResponses) {
     let tokenUriMetadata = { ...metadataTemplate };
-    tokenUriMetadata.name = files[imageUploadResponseIndex].replace(".jpg", "");
+    tokenUriMetadata.name = files[imageUploadResponseIndex].replace(".jpeg", "");
     tokenUriMetadata.description = `An governance ${tokenUriMetadata.name} token for voting/funding.`;
-    tokenUriMetadata.image = `ifps://${imageUploadResponses[imageUploadResponseIndex].IpfsHash}`;
+    tokenUriMetadata.image = `ipfs://${imageUploadResponses[imageUploadResponseIndex].IpfsHash}`;
     console.log(`Uploading ${tokenUriMetadata.name}...`);
 
     const metadataUploadResponse = await storeTokenUriMetadata(tokenUriMetadata);
